@@ -1,0 +1,17 @@
+{
+  "name": "digital-safety-backend",
+  "version": "1.0.0",
+  "description": "Foundational Express API for the Digital Safety AI Platform",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2"
+  }
+}
