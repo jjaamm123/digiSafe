@@ -7,23 +7,12 @@ const supabaseKey = 'sb_publishable_gJQ-3jcRrkPjzLQ4vCiJIg_RAgyl7LR';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function seedDatabase() {
-  console.log('🌱 Starting database seed...');
+  console.log('🌱 Starting B2C database seed...');
 
-  // 1. Create an Organization
-  const { data: org, error: orgError } = await supabase
-    .from('organizations')
-    .insert([{ name: 'Acme Corp', subscription_tier: 'Enterprise' }])
-    .select()
-    .single();
-
-  if (orgError) throw orgError;
-  console.log(`✅ Created Org: ${org.name}`);
-
-  // 2. Create 10 Users for that Org
+  // 1. Generate 10 Standalone Mock Users
   const usersToInsert = Array.from({ length: 10 }).map(() => ({
-    org_id: org.id,
     email: faker.internet.email(),
-    role: faker.helpers.arrayElement(['employee', 'manager']),
+    role: faker.helpers.arrayElement(['user', 'premium_user']),
     vulnerability_index: faker.number.int({ min: 0, max: 100 })
   }));
 
@@ -33,14 +22,13 @@ async function seedDatabase() {
     .select();
 
   if (usersError) throw usersError;
-  console.log(`✅ Created 10 Users`);
+  console.log(`✅ Created 10 Standalone Users`);
 
-  // 3. Generate 500 Scan Events over the last 30 days
+  // 2. Generate 500 Mock Scan Events tied directly to users
   const events = Array.from({ length: 500 }).map(() => ({
     user_id: faker.helpers.arrayElement(users).id,
-    org_id: org.id,
     source: faker.helpers.arrayElement(['gmail', 'linkedin', 'sms']),
-    threat_category: faker.helpers.arrayElement(['safe', 'phishing', 'scam', 'misinformation']),
+    threat_category: faker.helpers.arrayElement(['Safe', 'Phishing', 'Scam', 'Misinformation']),
     confidence_score: faker.number.int({ min: 50, max: 99 }),
     ai_explanation: faker.lorem.sentence(),
     timestamp: faker.date.recent({ days: 30 }).toISOString()
@@ -52,7 +40,7 @@ async function seedDatabase() {
 
   if (eventsError) throw eventsError;
   console.log(`✅ Created 500 Mock Scan Events`);
-  console.log('🎉 Seeding Complete! Your dashboard has data.');
+  console.log('🎉 Seeding Complete! Your B2C dashboard has data.');
 }
 
 seedDatabase().catch(console.error);

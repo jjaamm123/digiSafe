@@ -1,24 +1,45 @@
 import express from 'express';
+import crypto from 'crypto';
+import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
+
+// Ensure environment variables are loaded
+dotenv.config();
 
 const router = express.Router();
 
-// Initialize the Google Gen AI client if API Key is available
+// 1. Dependencies & Initialization
 const apiKey = process.env.GEMINI_API_KEY;
 let ai = null;
 
-if (apiKey && apiKey !== 'your_gemini_api_key_here') {
+if (apiKey) {
   try {
     ai = new GoogleGenAI({ apiKey });
-    console.log('[Digital Safety Backend] Google Gen AI SDK initialized successfully with API Key.');
+    console.log('[Digital Safety Backend] Google Gen AI SDK initialized successfully.');
   } catch (error) {
     console.error('[Digital Safety Backend] Failed to initialize Google Gen AI client:', error);
   }
 } else {
-  console.log('[Digital Safety Backend] No GEMINI_API_KEY found. Running in OFFLINE Fallback Mock Mode.');
+  console.warn('[Digital Safety Backend] WARNING: No GEMINI_API_KEY found.');
 }
 
-// System Prompt provided by the user
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+let supabase = null;
+
+if (supabaseUrl && supabaseKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseKey);
+    console.log('[Digital Safety Backend] Supabase client initialized successfully.');
+  } catch (error) {
+    console.error('[Digital Safety Backend] Failed to initialize Supabase client:', error);
+  }
+} else {
+  console.warn('[Digital Safety Backend] WARNING: Missing Supabase credentials.');
+}
+
+// 2. The Gemini AI Pipeline Configuration
 const SYSTEM_PROMPT = `You are an expert Cybersecurity Threat Intelligence API. 
 Your sole function is to analyze digital communications (emails, messages, web text) and detect phishing, financial scams, social engineering, and malicious misinformation.
 
@@ -27,9 +48,10 @@ You must analyze the provided user text and return your assessment STRICTLY as a
 Perform your analysis based on these criteria:
 1. HIGH RISK (Score 80-100): Clear malicious intent, credential harvesting, aggressive urgency, suspicious links, or known scam typologies.
 2. MEDIUM RISK (Score 40-79): Suspicious elements, unusual requests for information or money, unverified claims, but lacks definitive malicious payload.
-3. LOW RISK (Score 0-39): Standard communication, safe marketing, or benign text.`;
+3. LOW RISK (Score 0-39): Standard communication, safe marketing, or benign text.
 
-// Gemini Response JSON Schema configuration for Structured Outputs
+You must explain the "why" behind the threat in your indicators and accurately extract flaggedPhrases from the text.`;
+
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -42,92 +64,63 @@ const RESPONSE_SCHEMA = {
     },
     classification: {
       type: 'STRING',
-      enum: ['Phishing Attempt', 'Financial Scam', 'Misinformation', 'Clean / Safe']
+      enum: ['Phishing', 'Scam', 'Misinformation', 'Safe']
     },
     indicators: {
       type: 'ARRAY',
       items: { type: 'STRING' },
-      description: 'Array of 1 to 3 short, specific sentences explaining why this score was given. Be highly specific to the text.'
+      description: 'Array of strings explaining the reasoning behind the risk score.'
     },
     flaggedPhrases: {
       type: 'ARRAY',
       items: { type: 'STRING' },
-      description: 'Array of 1 to 5 exact words or short phrases pulled directly from the user text that triggered the risk score. If safe, leave empty.'
+      description: 'Array of exact substrings extracted from the text that indicate danger. Empty if safe.'
     }
   },
   required: ['riskLevel', 'riskScore', 'classification', 'indicators', 'flaggedPhrases']
 };
 
 /**
- * Local Fallback Threat Analyzer (for offline use and verification)
+ * 4. Error Handling & Fallback
+ * Hardcoded Fallback Heuristics mock response
  */
-const analyzeTextLocalFallback = (text = '') => {
-  const lowercaseText = text.toLowerCase();
-  
-  if (lowercaseText.includes('password') || lowercaseText.includes('credential') || lowercaseText.includes('update your account')) {
-    return {
-      riskLevel: 'HIGH',
-      riskScore: 88,
-      classification: 'Phishing Attempt',
-      indicators: ['Requests credential modifications', 'Urgent call-to-action phrasing detected'],
-      flaggedPhrases: ['password', 'credential', 'update your account']
-    };
-  }
-  
-  if (lowercaseText.includes('transfer') || lowercaseText.includes('money') || lowercaseText.includes('urgent') || lowercaseText.includes('inheritance')) {
-    return {
-      riskLevel: 'MEDIUM',
-      riskScore: 65,
-      classification: 'Financial Scam',
-      indicators: ['Suspicious monetary mentions', 'High-pressure urgency markers'],
-      flaggedPhrases: ['transfer', 'money', 'urgent']
-    };
-  }
-
-  if (lowercaseText.includes('fake news') || lowercaseText.includes('conspiracy') || lowercaseText.includes('unverified source')) {
-    return {
-      riskLevel: 'MEDIUM',
-      riskScore: 50,
-      classification: 'Misinformation',
-      indicators: ['Mentions unverified claims', 'Sensationalist style indicators'],
-      flaggedPhrases: ['fake news', 'unverified source']
-    };
-  }
-
+const getFallbackHeuristics = () => {
   return {
+    isMock: true,
     riskLevel: 'LOW',
-    riskScore: 12,
-    classification: 'Clean / Safe',
-    indicators: ['No typical phishing, scam, or misinformation markers found'],
+    riskScore: 0,
+    classification: 'Safe',
+    indicators: ['Fallback heuristics activated due to AI service unavailability or missing API key.', 'Unable to perform deep threat analysis.'],
     flaggedPhrases: []
   };
 };
 
 // POST /api/scan
-router.post('/scan', async (req, res, next) => {
+router.post('/scan', async (req, res) => {
   try {
     const { text, source } = req.body;
 
+    // Basic validation
     if (!text || typeof text !== 'string') {
-      return res.status(400).json({
-        success: false,
+      return res.status(400).json({ 
+        success: false, 
         error: 'Bad Request',
-        message: 'Invalid payload: "text" field is required and must be a string'
+        message: 'Invalid payload: "text" is required.' 
       });
     }
 
     console.log(`\n--- [${new Date().toISOString()}] Scan Request Received ---`);
     console.log(`Source: ${source || 'Unknown'}`);
     console.log(`Content Length: ${text.length} characters`);
-    console.log(`Content Preview: "${text.substring(0, 150)}${text.length > 150 ? '...' : ''}"`);
-
+    
     let analysisResult = null;
     let isMock = true;
 
-    // Use Gemini API if initialized
+    // Attempt Gemini AI Analysis
     if (ai) {
       try {
-        console.log('Routing request to Gemini AI Engine...');
+        console.log('Sending payload to Gemini 2.5 Flash for threat analysis...');
+        
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: text,
@@ -135,51 +128,84 @@ router.post('/scan', async (req, res, next) => {
             systemInstruction: SYSTEM_PROMPT,
             responseMimeType: 'application/json',
             responseSchema: RESPONSE_SCHEMA,
-            // Low temperature ensures deterministic, objective risk evaluations
-            temperature: 0.1
+            temperature: 0.1 // Low temperature for deterministic analysis
           }
         });
 
         if (response.text) {
           analysisResult = JSON.parse(response.text);
           isMock = false;
-          console.log('Gemini Analysis Successful.');
+          console.log(`Gemini Analysis Complete: ${analysisResult.classification} [Risk Score: ${analysisResult.riskScore}]`);
         } else {
           throw new Error('Received empty response from Gemini API');
         }
-      } catch (geminiError) {
-        console.error('Gemini API call failed, falling back to local analysis:', geminiError);
+      } catch (aiError) {
+        console.error('Gemini API Request Failed:', aiError);
+        // Do not crash; execution will drop down to the fallback block
       }
     }
 
-    // Fallback if Gemini failed or is not configured
+    // Apply Fallback if Gemini failed or is unconfigured
     if (!analysisResult) {
-      console.log('Running Fallback Heuristics analysis...');
-      analysisResult = analyzeTextLocalFallback(text);
+      console.log('Applying Fallback Mock Heuristics...');
+      analysisResult = getFallbackHeuristics();
       isMock = true;
     }
 
-    // Standardize response payload
-    const responsePayload = {
+    // 3. The Telemetry Pipeline (Supabase Insertion)
+    // Only insert real telemetry data (skip if we used fallback mock data)
+    if (!isMock && supabase) {
+      try {
+        const eventId = crypto.randomUUID();
+        const userId = '0c182d52-887f-482e-8b87-12339c971fd5'; // Dummy UUID placeholder
+        
+        const scanEventRecord = {
+          id: eventId,
+          user_id: userId,
+          source: source || 'unknown',
+          threat_category: analysisResult.classification,
+          confidence_score: analysisResult.riskScore,
+          ai_explanation: analysisResult.indicators.join(' ')
+        };
+
+        const { error } = await supabase
+          .from('scan_events')
+          .insert([scanEventRecord]);
+
+        if (error) {
+          console.error('Supabase Insertion Error:', error);
+        } else {
+          console.log(`Telemetry successfully recorded to Supabase (Event ID: ${eventId})`);
+        }
+      } catch (telemetryError) {
+        console.error('Unexpected error in Telemetry Pipeline:', telemetryError);
+      }
+    }
+
+    // Return final structured payload to the extension
+    return res.json({
       success: true,
       data: {
         analyzedAt: new Date().toISOString(),
         source: source || 'unknown',
         isMock: isMock,
-        riskLevel: analysisResult.riskLevel,
-        riskScore: analysisResult.riskScore,
-        classification: analysisResult.classification,
-        indicators: analysisResult.indicators,
-        flaggedPhrases: analysisResult.flaggedPhrases
+        ...analysisResult
       }
-    };
+    });
 
-    console.log(`Result: ${analysisResult.classification} (Risk: ${analysisResult.riskScore}%, Level: ${analysisResult.riskLevel}, Mock: ${isMock})`);
-    console.log(`---------------------------------------------------------\n`);
-
-    return res.json(responsePayload);
   } catch (error) {
-    next(error);
+    console.error('Unexpected Server Error in /api/scan:', error);
+    
+    // Ultimate fallback catch-all to prevent server crash and return safe response
+    const fallback = getFallbackHeuristics();
+    return res.json({
+      success: true,
+      data: {
+        analyzedAt: new Date().toISOString(),
+        source: req.body?.source || 'unknown',
+        ...fallback
+      }
+    });
   }
 });
 
