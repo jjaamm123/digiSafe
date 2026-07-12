@@ -67,7 +67,7 @@
   top: 100%;
   left: 0;
   margin-top: 8px;
-  width: 280px;
+  width: 300px;
   background: rgba(15, 23, 42, 0.92);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -81,6 +81,8 @@
   gap: 10px;
   animation: dsa-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
+  /* Smooth height transitions for expanded state */
+  transition: box-shadow 0.3s ease;
 }
 
 @keyframes dsa-fade-in {
@@ -192,4 +194,142 @@
   font-size: 11px;
   color: #f87171;
   line-height: 1.4;
+}
+
+/* ============================================================
+   EXTENDED VIEW - Collapsible Detailed Analysis Panel
+   ============================================================ */
+
+/* Toggle button that sits at the bottom of the card */
+.dsa-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 7px 10px;
+  margin-top: 2px;
+  transition: all 0.2s ease;
+  text-align: left;
+  letter-spacing: 0.3px;
+}
+
+.dsa-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Chevron icon inside the toggle button */
+.dsa-toggle-chevron {
+  display: inline-block;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* Rotate chevron when panel is expanded */
+.dsa-toggle-btn.dsa-expanded .dsa-toggle-chevron {
+  transform: rotate(180deg);
+}
+
+/* Collapsible Extended View container */
+.dsa-extended-view {
+  overflow: hidden;
+  /* Animate max-height for smooth accordion effect */
+  max-height: 0;
+  opacity: 0;
+  transition:
+    max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Expanded state - driven by JS toggling this class */
+.dsa-extended-view.dsa-open {
+  max-height: 300px;
+  opacity: 1;
+}
+
+/* Inner wrapper for extended view content */
+.dsa-extended-content {
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Section label inside extended view */
+.dsa-extended-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Flagged phrases pill container */
+.dsa-flagged-phrases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Empty state message when no flagged phrases exist */
+.dsa-no-flags {
+  font-size: 11px;
+  color: #10b981;
+  font-style: italic;
+}
+
+/* ============================================================
+   WARNING PILL - Malicious phrase highlight badge
+   ============================================================ */
+.dsa-warning-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  /* Subtle entrance animation for each pill */
+  animation: dsa-pill-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Danger dot prefix inside each pill */
+.dsa-warning-pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  background: #ef4444;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes dsa-pill-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

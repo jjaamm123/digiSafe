@@ -9,7 +9,9 @@ dotenv.config();
 
 const router = express.Router();
 
-// 1. Dependencies & Initialization
+// ─────────────────────────────────────────────────────────────
+// 1. Client Initialization
+// ─────────────────────────────────────────────────────────────
 const apiKey = process.env.GEMINI_API_KEY;
 let ai = null;
 
@@ -21,7 +23,7 @@ if (apiKey) {
     console.error('[Digital Safety Backend] Failed to initialize Google Gen AI client:', error);
   }
 } else {
-  console.warn('[Digital Safety Backend] WARNING: No GEMINI_API_KEY found.');
+  console.warn('[Digital Safety Backend] WARNING: No GEMINI_API_KEY found. Running in Fallback Mode.');
 }
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -39,126 +41,238 @@ if (supabaseUrl && supabaseKey) {
   console.warn('[Digital Safety Backend] WARNING: Missing Supabase credentials.');
 }
 
-// 2. The Gemini AI Pipeline Configuration
-const SYSTEM_PROMPT = `You are an expert Cybersecurity Threat Intelligence API. 
-Your sole function is to analyze digital communications (emails, messages, web text) and detect phishing, financial scams, social engineering, and malicious misinformation.
+// ─────────────────────────────────────────────────────────────
+// 2. Gemini System Prompt (built dynamically per-request)
+// Injects current timestamp for temporal awareness and contains
+// the Sender Verification + Unsure Failsafe guardrail logic.
+// ─────────────────────────────────────────────────────────────
+const buildSystemPrompt = (sender = '') => {
+  // Inject live timestamp so the AI never hallucinates past/future dates
+  const currentDateTime = new Date().toISOString();
 
-You must analyze the provided user text and return your assessment STRICTLY as a JSON object. Do not include markdown formatting, conversational text, or any other output besides the JSON.
+  // Build the sender metadata block. When the Chrome extension successfully extracts
+  // the raw "from" address from the Gmail header card, it is passed here explicitly
+  // so the model does NOT have to guess or hunt for it inside the email body text.
+  const senderBlock = sender
+    ? `[SENDER VERIFICATION METADATA]:
+- Claimed Sender Field: ${sender}
+- Extracted Domain    : ${sender.includes('@') ? sender.split('@')[1].trim() : 'unknown'}
 
-Perform your analysis based on these criteria:
-1. HIGH RISK (Score 80-100): Clear malicious intent, credential harvesting, aggressive urgency, suspicious links, or known scam typologies.
-2. MEDIUM RISK (Score 40-79): Suspicious elements, unusual requests for information or money, unverified claims, but lacks definitive malicious payload.
-3. LOW RISK (Score 0-39): Standard communication, safe marketing, or benign text.
+CRITICAL DOMAIN-MATCH OVERRIDE RULE:
+If the domain extracted from the [SENDER VERIFICATION METADATA] above accurately matches
+the real-world operational domain of the institution named inside the email body text
+(for example: "@sbl.com.np" mapping to "Siddhartha Bank Limited", or "@nabilbank.com"
+mapping to "Nabil Bank"), you MUST apply the following overrides:
+  1. Classify the email as "Safe" — not "Unsure" and not "Phishing".
+  2. Set riskScore to 15 or lower.
+  3. Do NOT penalise the email for minor typos, formatting inconsistencies, or small
+     numerical discrepancies in the email body — these are common in automated
+     transactional messages and are NOT indicators of phishing on their own.
+  4. Populate senderDomain with the extracted domain string.
+  5. Leave flaggedPhrases as an empty array.
+  6. Leave summaryDetails as an empty string.
 
-You must explain the "why" behind the threat in your indicators and accurately extract flaggedPhrases from the text.`;
+This override exists because the sender address is authoritative metadata controlled by
+the mail server, not by an attacker who can only influence the body text.
+`
+    : `[SENDER VERIFICATION METADATA]:
+- Claimed Sender Field: NOT PROVIDED
+- Extracted Domain    : unknown
 
+No sender address was supplied by the scanner. You must attempt to extract it from
+the email body text itself (headers, footers, reply-to fields, signature blocks).
+If no domain can be identified, note this in indicators and apply conservative scoring.
+`;
+
+  return `You are an expert Cybersecurity Threat Intelligence API with temporal awareness.
+
+CURRENT DATE AND TIME (ISO 8601): ${currentDateTime}
+Use this timestamp as your ground truth when evaluating date-related claims in the text.
+Do NOT hallucinate past or future dates. If the text references a date or time, compare
+it against this timestamp before drawing conclusions.
+
+${senderBlock}
+────────────────────────────────────────────────
+STEP 1 — SENDER DOMAIN ANALYSIS (MANDATORY)
+────────────────────────────────────────────────
+If the [SENDER VERIFICATION METADATA] block above contains a valid domain, use it as
+your primary trust signal — do not override it with guesswork from the body text.
+
+If you must fall back to scanning the body text for a domain:
+- Extract the full sender domain (e.g., "alerts@siddharthabank.com" → "siddharthabank.com").
+- Compare against the organization claimed in the body.
+- Same root domain + official TLD = STRONG trust signal.
+- Do NOT penalise for minor typos in transactional data tables (amounts, dates).
+- Domain mismatch IS a strong phishing signal.
+
+────────────────────────────────────────────────
+STEP 2 — CLASSIFICATION WITH FAILSAFE LOGIC
+────────────────────────────────────────────────
+Classify the message into exactly ONE of these three states:
+
+"Phishing" (riskScore 70–100):
+  ONLY when you have concrete, verifiable evidence of malicious intent.
+  Required evidence: mismatched sender domain, credential harvesting links,
+  impersonation with domain mismatch, or known scam patterns with clear payload.
+  Do NOT use if the sender domain legitimately matches the claimed organisation.
+
+"Unsure" (riskScore 40–69):
+  Your DEFAULT for all gray-area cases. When in doubt, always use "Unsure".
+  Triggers: transactional email you cannot fully verify, legitimate-looking domain
+  with minor anomalies, sensitive action requested from plausible domain.
+  REQUIRED: populate summaryDetails with one neutral factual sentence.
+
+"Safe" (riskScore 0–39):
+  ONLY for clearly benign messages — newsletters, personal correspondence,
+  or verified-domain transactional emails with no anomalies.
+
+────────────────────────────────────────────────
+STEP 3 — OUTPUT REQUIREMENTS
+────────────────────────────────────────────────
+- Return ONLY a valid JSON object. No markdown, no prose, no code fences.
+- Be highly specific in indicators — reference actual phrases, domains, and dates.
+- Only populate flaggedPhrases with GENUINE risk indicators.
+- For "Safe" or "Phishing" classifications, summaryDetails must be an empty string "".`;
+};
+
+// ─────────────────────────────────────────────────────────────
+// 3. Response JSON Schema
+// Updated to include "Unsure" classification and summaryDetails
+// ─────────────────────────────────────────────────────────────
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
     riskLevel: {
       type: 'STRING',
-      enum: ['HIGH', 'MEDIUM', 'LOW']
+      enum: ['HIGH', 'MEDIUM', 'LOW'],
+      description: 'HIGH for Phishing, MEDIUM for Unsure, LOW for Safe.'
     },
     riskScore: {
-      type: 'INTEGER'
+      type: 'INTEGER',
+      description: 'Risk score: 70-100 for Phishing, 40-69 for Unsure, 0-39 for Safe.'
     },
     classification: {
       type: 'STRING',
-      enum: ['Phishing', 'Scam', 'Misinformation', 'Safe']
+      enum: ['Phishing', 'Unsure', 'Safe'],
+      description: 'Three-state classification. Default to Unsure for all gray-area emails.'
+    },
+    senderDomain: {
+      type: 'STRING',
+      description: 'The extracted sender email domain (e.g. "siddharthabank.com"). Empty string if not found.'
     },
     indicators: {
       type: 'ARRAY',
       items: { type: 'STRING' },
-      description: 'Array of strings explaining the reasoning behind the risk score.'
+      description: 'Array of 1–4 specific, evidence-based sentences explaining the score. Reference actual text content, domains, and dates.'
     },
     flaggedPhrases: {
       type: 'ARRAY',
       items: { type: 'STRING' },
-      description: 'Array of exact substrings extracted from the text that indicate danger. Empty if safe.'
+      description: 'Exact substrings from the text that are genuine risk indicators. Empty array if Safe or no real signals found.'
+    },
+    summaryDetails: {
+      type: 'STRING',
+      description: 'REQUIRED when classification is Unsure. A neutral, factual one-sentence summary of what the email is asking the user to do (e.g. "This message claims to be a transaction alert from Siddhartha Bank for NPR 1.50. The sender domain matches the bank, but proceed with caution."). Must be an empty string "" for Safe or Phishing classifications.'
     }
   },
-  required: ['riskLevel', 'riskScore', 'classification', 'indicators', 'flaggedPhrases']
+  required: ['riskLevel', 'riskScore', 'classification', 'senderDomain', 'indicators', 'flaggedPhrases', 'summaryDetails']
 };
 
-/**
- * 4. Error Handling & Fallback
- * Hardcoded Fallback Heuristics mock response
- */
+// ─────────────────────────────────────────────────────────────
+// 4. Fallback Heuristics (used when Gemini is unavailable)
+// ─────────────────────────────────────────────────────────────
 const getFallbackHeuristics = () => {
   return {
     isMock: true,
     riskLevel: 'LOW',
     riskScore: 0,
     classification: 'Safe',
-    indicators: ['Fallback heuristics activated due to AI service unavailability or missing API key.', 'Unable to perform deep threat analysis.'],
-    flaggedPhrases: []
+    senderDomain: '',
+    indicators: [
+      'Fallback heuristics activated — AI analysis engine is unavailable or API key is missing.',
+      'This result is not a real threat assessment. Configure GEMINI_API_KEY to enable live scanning.'
+    ],
+    flaggedPhrases: [],
+    summaryDetails: ''
   };
 };
 
+// ─────────────────────────────────────────────────────────────
 // POST /api/scan
+// ─────────────────────────────────────────────────────────────
 router.post('/scan', async (req, res) => {
   try {
-    const { text, source } = req.body;
+    // Destructure sender — the raw email address extracted from the Gmail DOM header
+    // by the Chrome extension (e.g. "noreply@sbl.com.np"). Falls back to empty string
+    // when not provided (LinkedIn posts, missing header, older extension versions).
+    const { text, source, sender = '' } = req.body;
 
-    // Basic validation
+    // Basic payload validation
     if (!text || typeof text !== 'string') {
-      return res.status(400).json({ 
-        success: false, 
+      return res.status(400).json({
+        success: false,
         error: 'Bad Request',
-        message: 'Invalid payload: "text" is required.' 
+        message: 'Invalid payload: "text" field is required and must be a string.'
       });
     }
 
-    console.log(`\n--- [${new Date().toISOString()}] Scan Request Received ---`);
-    console.log(`Source: ${source || 'Unknown'}`);
-    console.log(`Content Length: ${text.length} characters`);
-    
+    const requestTimestamp = new Date().toISOString();
+    console.log(`\n─── [${requestTimestamp}] Scan Request Received ───`);
+    console.log(`Source       : ${source || 'Unknown'}`);
+    console.log(`Sender       : ${sender  || '(not provided)'}`);
+    console.log(`Content Len  : ${text.length} characters`);
+    console.log(`Preview      : "${text.substring(0, 120)}${text.length > 120 ? '...' : ''}"`);
+
     let analysisResult = null;
     let isMock = true;
 
-    // Attempt Gemini AI Analysis
+    // ── Gemini AI Analysis ──────────────────────────────────
     if (ai) {
       try {
-        console.log('Sending payload to Gemini 2.5 Flash for threat analysis...');
-        
+        // Build the system prompt fresh per request:
+        // injects the current timestamp AND the sender address as an authoritative
+        // metadata block so the model can apply the domain-match override rule.
+        const systemPrompt = buildSystemPrompt(sender);
+
+        console.log(`Routing to Gemini 2.5 Flash [sender=${sender || 'none'}]...`);
+
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: text,
           config: {
-            systemInstruction: SYSTEM_PROMPT,
-            responseMimeType: 'application/json',
+            systemInstruction: systemPrompt,
+            responseMimeType: 'application/json', // Enforce strict JSON output
             responseSchema: RESPONSE_SCHEMA,
-            temperature: 0.1 // Low temperature for deterministic analysis
+            temperature: 0.1 // Near-zero temp for deterministic, objective threat scoring
           }
         });
 
         if (response.text) {
           analysisResult = JSON.parse(response.text);
           isMock = false;
-          console.log(`Gemini Analysis Complete: ${analysisResult.classification} [Risk Score: ${analysisResult.riskScore}]`);
+          console.log(`Gemini Result : ${analysisResult.classification} (Score: ${analysisResult.riskScore}, Domain: "${analysisResult.senderDomain || 'not found'}")`);
         } else {
-          throw new Error('Received empty response from Gemini API');
+          throw new Error('Received an empty response body from the Gemini API.');
         }
       } catch (aiError) {
-        console.error('Gemini API Request Failed:', aiError);
-        // Do not crash; execution will drop down to the fallback block
+        // Log but never crash — fall through to heuristics
+        console.error('Gemini API call failed. Falling back to mock heuristics:', aiError.message || aiError);
       }
     }
 
-    // Apply Fallback if Gemini failed or is unconfigured
+    // ── Fallback if Gemini unavailable or errored ───────────
     if (!analysisResult) {
-      console.log('Applying Fallback Mock Heuristics...');
+      console.log('Applying Fallback Heuristics (isMock = true)...');
       analysisResult = getFallbackHeuristics();
       isMock = true;
     }
 
-    // 3. The Telemetry Pipeline (Supabase Insertion)
-    // Only insert real telemetry data (skip if we used fallback mock data)
+    // ── Telemetry → Supabase (only for live AI results) ─────
     if (!isMock && supabase) {
       try {
         const eventId = crypto.randomUUID();
-        const userId = '0c182d52-887f-482e-8b87-12339c971fd5'; // Dummy UUID placeholder
-        
+        const userId = '0c182d52-887f-482e-8b87-12339c971fd5'; // Placeholder — replaced by real auth in Phase 3
+
         const scanEventRecord = {
           id: eventId,
           user_id: userId,
@@ -168,35 +282,42 @@ router.post('/scan', async (req, res) => {
           ai_explanation: analysisResult.indicators.join(' ')
         };
 
-        const { error } = await supabase
+        const { error: dbError } = await supabase
           .from('scan_events')
           .insert([scanEventRecord]);
 
-        if (error) {
-          console.error('Supabase Insertion Error:', error);
+        if (dbError) {
+          console.error('Supabase Insertion Error:', dbError);
         } else {
-          console.log(`Telemetry successfully recorded to Supabase (Event ID: ${eventId})`);
+          console.log(`Telemetry recorded → Supabase (Event ID: ${eventId})`);
         }
       } catch (telemetryError) {
-        console.error('Unexpected error in Telemetry Pipeline:', telemetryError);
+        // Telemetry failure must never block the response to the user
+        console.error('Telemetry pipeline error (non-fatal):', telemetryError.message || telemetryError);
       }
     }
 
-    // Return final structured payload to the extension
+    // ── Final Response ───────────────────────────────────────
     return res.json({
       success: true,
       data: {
-        analyzedAt: new Date().toISOString(),
+        analyzedAt: requestTimestamp,
         source: source || 'unknown',
-        isMock: isMock,
-        ...analysisResult
+        isMock,
+        riskLevel:       analysisResult.riskLevel,
+        riskScore:       analysisResult.riskScore,
+        classification:  analysisResult.classification,
+        senderDomain:    analysisResult.senderDomain   ?? '',
+        indicators:      analysisResult.indicators     ?? [],
+        flaggedPhrases:  analysisResult.flaggedPhrases ?? [],
+        summaryDetails:  analysisResult.summaryDetails ?? ''
       }
     });
 
   } catch (error) {
-    console.error('Unexpected Server Error in /api/scan:', error);
-    
-    // Ultimate fallback catch-all to prevent server crash and return safe response
+    // Ultimate catch-all — server must never crash
+    console.error('Unhandled Server Error in POST /api/scan:', error.message || error);
+
     const fallback = getFallbackHeuristics();
     return res.json({
       success: true,

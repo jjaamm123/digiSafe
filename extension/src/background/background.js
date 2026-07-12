@@ -52,13 +52,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 /**
  * Sends text payload to Express backend scan endpoint
  */
-async function scanTextContent({ text, source }) {
+async function scanTextContent({ text, source, sender = '' }) {
   const response = await fetch(BACKEND_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ text, source })
+    // sender is the raw email address extracted from the DOM (e.g. "noreply@sbl.com.np").
+    // The backend injects it directly into the Gemini system prompt for domain verification.
+    body: JSON.stringify({ text, source, sender })
   });
 
   if (!response.ok) {
