@@ -10,8 +10,14 @@ dotenv.config();
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────
-// 1. Client Initialization
+// 1. Client Initialization & CORS Middleware
 // ─────────────────────────────────────────────────────────────
+router.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
 const apiKey = process.env.GEMINI_API_KEY;
 let ai = null;
 
@@ -198,7 +204,14 @@ const getFallbackHeuristics = () => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// POST /api/scan
+// OPTIONS /scan (CORS Preflight)
+// ─────────────────────────────────────────────────────────────
+router.options('/scan', (req, res) => {
+  return res.status(200).send();
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /scan
 // ─────────────────────────────────────────────────────────────
 router.post('/scan', async (req, res) => {
   try {
