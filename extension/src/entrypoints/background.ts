@@ -1,11 +1,12 @@
 import { defineBackground } from 'wxt/sandbox';
+import { supabase } from '@/utils/supabase';
 
 export default defineBackground(() => {
   console.log('DigiSafe Background Worker initialized.');
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'SCAN_REQUEST') {
-      handleScanWithFallback(message.payload)
+      sendScanPayload(message.payload)
         .then((data) => sendResponse({ success: true, data }))
         .catch((err) => {
           console.error('[DigiSafe Background Worker] Scan Failure:', err);
@@ -18,47 +19,31 @@ export default defineBackground(() => {
     }
   });
 
-  async function handleScanWithFallback(payload: { text: string; source: string }) {
-    // Support both 3000 (Next.js) and 5000 (Express)
-    const candidateUrls = [
-      'http://localhost:3000/api/scan',
-      'http://127.0.0.1:3000/api/scan',
-      'http://localhost:5000/api/scan'
-    ];
+  async function sendScanPayload(payload: any) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const email = session?.user?.email;
 
-    let lastError: Error | null = null;
+      const bodyPayload = { ...payload, email };
 
-    for (const url of candidateUrls) {
-      try {
-        console.log(`[DigiSafe] Attempting scan request to: ${url}`);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const response = await fetch('http://localhost:5000/api/scan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(bodyPayload),
+      });
 
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        console.log(`[DigiSafe] Scan successful via: ${url}`);
-        return result;
-      } catch (err: any) {
-        console.warn(`[DigiSafe] Failed endpoint ${url}:`, err.message);
-        lastError = err;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-    }
 
-    throw lastError || new Error('All backend endpoints unreachable');
+      return await response.json();
+    } catch (error) {
+      console.error('[DigiSafe Background Worker] Scan Failure:', error);
+      throw error;
+    }
   }
 });

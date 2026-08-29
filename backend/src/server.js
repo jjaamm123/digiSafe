@@ -8,12 +8,16 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Enable CORS for local development and chrome extension access
+// Enable CORS for local development and chrome extension access (chrome-extension://* origin)
 app.use(cors({
-  origin: '*', // In production, restrict this to specific extension IDs: chrome-extension://<id>
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: '*', // In production, restrict to specific extension IDs: chrome-extension://<id>
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204, // Chrome MV3 pre-flight expects 204
 }));
+
+// Ensure OPTIONS pre-flight requests are handled before any other middleware
+app.options('*', cors());
 
 // Body parser middleware for JSON payloads
 app.use(express.json());

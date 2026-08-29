@@ -6,14 +6,15 @@ export default defineConfig({
     manifest_version: 3,
     name: 'DigiSafe Threat Detector',
     version: '1.0.0',
-    permissions: ['storage', 'activeTab', 'scripting'],
+    permissions: ['storage', 'activeTab', 'scripting', 'identity', 'tabs'],
     host_permissions: [
-      'https://mail.google.com/*',
-      'https://*.linkedin.com/*',
-      'http://localhost:3000/*',
       'http://localhost:5000/*',
+      'http://localhost:3000/*',
       'http://127.0.0.1:3000/*',
-      'http://127.0.0.1:5000/*'
+      'http://127.0.0.1:5000/*',
+      'https://abmtdxixfbryubdapgow.supabase.co/*',
+      '*://mail.google.com/*',
+      '*://*.linkedin.com/*'
     ],
   },
   srcDir: 'src',

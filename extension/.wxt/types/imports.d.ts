@@ -19,6 +19,7 @@ declare global {
   const fakeBrowser: typeof import('wxt/testing')['fakeBrowser']
   const injectScript: typeof import('wxt/client')['injectScript']
   const storage: typeof import('wxt/storage')['storage']
+  const supabase: typeof import('C:/Users/lenovo/Desktop/CAPSTONE/extension/src/utils/supabase')['supabase']
   const useAppConfig: typeof import('wxt/client')['useAppConfig']
 }
 // for type re-export

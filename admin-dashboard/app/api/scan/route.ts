@@ -146,8 +146,20 @@ export async function POST(req: NextRequest) {
     // 3. Database Telemetry
     if (supabase) {
       try {
+        let authUserId = null;
+        const authHeader = req.headers.get('Authorization');
+        
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          const token = authHeader.replace('Bearer ', '');
+          const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+          
+          if (!authError && user) {
+            authUserId = user.id;
+          }
+        }
+
         const { error } = await supabase.from('scan_events').insert({
-          user_id: body.userId || null,
+          user_id: authUserId,
           source: body.source || 'unknown',
           raw_text_length: body.text.length,
           threat_category: scanResponse!.classification,

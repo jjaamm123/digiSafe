@@ -284,25 +284,52 @@ router.post('/scan', async (req, res) => {
     if (!isMock && supabase) {
       try {
         const eventId = crypto.randomUUID();
-        const userId = '0c182d52-887f-482e-8b87-12339c971fd5'; // Placeholder — replaced by real auth in Phase 3
+        let userId = null;
 
-        const scanEventRecord = {
-          id: eventId,
-          user_id: userId,
-          source: source || 'unknown',
-          threat_category: analysisResult.classification,
-          confidence_score: analysisResult.riskScore,
-          ai_explanation: analysisResult.indicators.join(' ')
-        };
+        // Extract real user from the Bearer token
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          const token = authHeader.substring(7);
+          const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+          if (!authError && user) {
+            userId = user.id;
+          }
+        }
 
-        const { error: dbError } = await supabase
-          .from('scan_events')
-          .insert([scanEventRecord]);
-
-        if (dbError) {
-          console.error('Supabase Insertion Error:', dbError);
+        if (!userId) {
+          console.warn('Telemetry skipped: No valid authenticated user found in request.');
         } else {
-          console.log(`Telemetry recorded → Supabase (Event ID: ${eventId})`);
+          // Ensure the user exists in the public users table before linking an event
+          const { error: userError } = await supabase
+            .from('users')
+            .upsert(
+              { id: userId, email: req.body.email || 'unknown@user.com' }, 
+              { onConflict: 'id' }
+            );
+            
+          if (userError) {
+            console.error('Failed to upsert user:', userError);
+            // Decide whether to throw or continue based on your architecture
+          }
+
+          const scanEventRecord = {
+            id: eventId,
+            user_id: userId,
+            source: source || 'unknown',
+            threat_category: analysisResult.classification,
+            confidence_score: analysisResult.riskScore,
+            ai_explanation: analysisResult.indicators.join(' ')
+          };
+
+          const { error: dbError } = await supabase
+            .from('scan_events')
+            .insert([scanEventRecord]);
+
+          if (dbError) {
+            console.error('Supabase Insertion Error:', dbError);
+          } else {
+            console.log(`Telemetry recorded → Supabase (Event ID: ${eventId})`);
+          }
         }
       } catch (telemetryError) {
         // Telemetry failure must never block the response to the user

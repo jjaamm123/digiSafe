@@ -19,6 +19,7 @@
     "fakeBrowser": true,
     "injectScript": true,
     "storage": true,
+    "supabase": true,
     "useAppConfig": true
   }
 }
