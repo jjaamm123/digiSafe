@@ -16,6 +16,7 @@ declare global {
   const defineContentScript: typeof import('wxt/sandbox')['defineContentScript']
   const defineUnlistedScript: typeof import('wxt/sandbox')['defineUnlistedScript']
   const defineWxtPlugin: typeof import('wxt/sandbox')['defineWxtPlugin']
+  const extractWhatsAppDOM: typeof import('C:/Users/lenovo/Desktop/CAPSTONE/extension/src/utils/whatsappExtractor')['extractWhatsAppDOM']
   const fakeBrowser: typeof import('wxt/testing')['fakeBrowser']
   const injectScript: typeof import('wxt/client')['injectScript']
   const storage: typeof import('wxt/storage')['storage']
@@ -27,4 +28,7 @@ declare global {
   // @ts-ignore
   export type { ThreatData } from 'C:/Users/lenovo/Desktop/CAPSTONE/extension/src/components/ThreatReportModal'
   import('C:/Users/lenovo/Desktop/CAPSTONE/extension/src/components/ThreatReportModal')
+  // @ts-ignore
+  export type { WhatsAppExtractPayload } from 'C:/Users/lenovo/Desktop/CAPSTONE/extension/src/utils/whatsappExtractor'
+  import('C:/Users/lenovo/Desktop/CAPSTONE/extension/src/utils/whatsappExtractor')
 }

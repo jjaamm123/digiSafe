@@ -52,7 +52,7 @@ if (supabaseUrl && supabaseKey) {
 // Injects current timestamp for temporal awareness and contains
 // the Sender Verification + Unsure Failsafe guardrail logic.
 // ─────────────────────────────────────────────────────────────
-const buildSystemPrompt = (sender = '') => {
+const buildSystemPrompt = (sender = '', isUnknownSender = false, hasCallEvent = false) => {
   // Inject live timestamp so the AI never hallucinates past/future dates
   const currentDateTime = new Date().toISOString();
 
@@ -90,6 +90,19 @@ the email body text itself (headers, footers, reply-to fields, signature blocks)
 If no domain can be identified, note this in indicators and apply conservative scoring.
 `;
 
+  let whatsappBlock = '';
+  if (isUnknownSender || hasCallEvent) {
+    whatsappBlock = `\n────────────────────────────────────────────────
+STEP 1.5 — WHATSAPP HEURISTIC ENRICHMENT
+────────────────────────────────────────────────\n`;
+    if (isUnknownSender) {
+      whatsappBlock += `- isUnknownSender === true: This message is from an unsaved/unknown contact. You MUST aggressively weigh urgency, impersonation, unsolicited job offers, financial requests, and OTP manipulation as high risk.\n`;
+    }
+    if (hasCallEvent) {
+      whatsappBlock += `- hasCallEvent === true: A missed voice/video call was detected in this chat. Add significant risk weighting for vishing follow-ups (e.g., missed calls preceding or following fraudulent requests).\n`;
+    }
+  }
+
   return `You are an expert Cybersecurity Threat Intelligence API with temporal awareness.
 
 CURRENT DATE AND TIME (ISO 8601): ${currentDateTime}
@@ -97,7 +110,7 @@ Use this timestamp as your ground truth when evaluating date-related claims in t
 Do NOT hallucinate past or future dates. If the text references a date or time, compare
 it against this timestamp before drawing conclusions.
 
-${senderBlock}
+${senderBlock}${whatsappBlock}
 ────────────────────────────────────────────────
 STEP 1 — SENDER DOMAIN ANALYSIS (MANDATORY)
 ────────────────────────────────────────────────
@@ -218,7 +231,7 @@ router.post('/scan', async (req, res) => {
     // Destructure sender — the raw email address extracted from the Gmail DOM header
     // by the Chrome extension (e.g. "noreply@sbl.com.np"). Falls back to empty string
     // when not provided (LinkedIn posts, missing header, older extension versions).
-    const { text, source, sender = '' } = req.body;
+    const { text, source, sender = '', isUnknownSender = false, hasCallEvent = false } = req.body;
 
     // Basic payload validation
     if (!text || typeof text !== 'string') {
@@ -245,7 +258,7 @@ router.post('/scan', async (req, res) => {
         // Build the system prompt fresh per request:
         // injects the current timestamp AND the sender address as an authoritative
         // metadata block so the model can apply the domain-match override rule.
-        const systemPrompt = buildSystemPrompt(sender);
+        const systemPrompt = buildSystemPrompt(sender, isUnknownSender, hasCallEvent);
 
         console.log(`Routing to Gemini 2.5 Flash [sender=${sender || 'none'}]...`);
 
@@ -316,9 +329,13 @@ router.post('/scan', async (req, res) => {
             id: eventId,
             user_id: userId,
             source: source || 'unknown',
+            raw_text_length: text.length,
             threat_category: analysisResult.classification,
             confidence_score: analysisResult.riskScore,
-            ai_explanation: analysisResult.indicators.join(' ')
+            ai_explanation: analysisResult.indicators.join(' '),
+            sender: sender,
+            is_unknown_sender: isUnknownSender,
+            created_at: new Date().toISOString()
           };
 
           const { error: dbError } = await supabase
