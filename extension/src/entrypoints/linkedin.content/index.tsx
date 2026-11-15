@@ -35,24 +35,42 @@ export default defineContentScript({
   },
 });
 
+function extractLinkedInAuthor(textContext: string = ''): string {
+  const txtLower = textContext.toLowerCase();
+  if (
+    txtLower.includes('linkedin security') || 
+    txtLower.includes('security notice') || 
+    document.querySelector('.notification-badge') || 
+    document.querySelector('[data-test-app-aware-link]')?.textContent?.includes('LinkedIn')
+  ) {
+    return 'LinkedIn System <security-noreply@linkedin.com>';
+  }
+
+  const authorEl =
+    document.querySelector('.feed-shared-actor__name span') ||
+    document.querySelector('.update-components-actor__name span') ||
+    document.querySelector('.msg-s-message-group__name');
+    
+  return authorEl?.textContent?.trim() || 'Unknown LinkedIn User';
+}
+
 function LinkedInScanner() {
   const [data, setData] = useState<ThreatData | null>(null);
   const [loading, setLoading] = useState(false);
   const [show, setShow] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [scannedPosts, setScannedPosts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let debounceTimer: NodeJS.Timeout;
 
     const observer = new MutationObserver((mutations) => {
-      // Look for LinkedIn posts
       const posts = document.querySelectorAll('.feed-shared-update-v2__description-wrapper, .update-components-text');
       
       let textToScan = '';
       
       posts.forEach(post => {
         const text = post.textContent?.trim();
-        // Basic check to see if we haven't scanned this post text recently
         if (text && text.length > 30 && !scannedPosts.has(text.substring(0, 50))) {
           textToScan = text;
           setScannedPosts(prev => new Set(prev).add(text.substring(0, 50)));
@@ -80,23 +98,35 @@ function LinkedInScanner() {
     
     setLoading(true);
     setShow(true);
+    setError(null);
+
+    if (!chrome.runtime?.id) {
+      setLoading(false);
+      setError('Extension updated. Please refresh the tab to reconnect.');
+      return;
+    }
     
     browser.runtime.sendMessage({
       type: 'SCAN_REQUEST',
-      payload: { text, source: 'linkedin' }
+      payload: { text, sender: extractLinkedInAuthor(text), source: 'linkedin' }
     }).then((response: any) => {
       setLoading(false);
       if (response && response.success) {
-        // Don't show modal for safe posts to avoid spamming the user on LinkedIn
         if (response.data.classification !== 'Safe') {
           setData(response.data);
         } else {
           setShow(false);
         }
       } else {
-        setShow(false);
-        console.error('Scan failed:', response?.error);
+        const errMsg = response?.error || 'Scan failed. Please refresh and try again.';
+        console.error('Scan failed:', errMsg);
+        setError(errMsg);
       }
+    }).catch((err: any) => {
+      setLoading(false);
+      const errMsg = err?.message || 'Connection error. Please refresh and try again.';
+      console.error('Message error:', errMsg);
+      setError(errMsg);
     });
   };
 
@@ -105,8 +135,12 @@ function LinkedInScanner() {
   return (
     <ThreatReportModal 
       data={data} 
-      loading={loading} 
-      onClose={() => setShow(false)} 
+      loading={loading}
+      error={error}
+      onClose={() => {
+        setShow(false);
+        setError(null);
+      }} 
     />
   );
 }

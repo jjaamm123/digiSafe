@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ScanEvent {
   id: string;
@@ -17,25 +19,13 @@ interface ScanEvent {
 }
 
 export default function WhatsAppDashboard() {
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<{ user?: { id?: string; email?: string } } | null>(null);
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
 
-  useEffect(() => {
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      if (session) {
-        fetchData(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    };
-    init();
-  }, []);
-
-  const fetchData = async (userId: string) => {
+  const fetchData = useCallback(async (userId: string) => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -52,12 +42,33 @@ export default function WhatsAppDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const init = async () => {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      setSession(currentSession);
+      if (currentSession?.user?.id) {
+        fetchData(currentSession.user.id);
+      } else {
+        setLoading(false);
+      }
+    };
+    init();
+  }, [fetchData]);
 
   if (!session && !loading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <p className="text-slate-100">Please sign in to view this page.</p>
+      <div className="min-h-screen bg-[#000000] flex items-center justify-center p-6 text-white font-sans">
+        <div className="apple-glass rounded-3xl p-8 max-w-md w-full text-center space-y-4">
+          <h2 className="text-lg font-semibold text-white">Sign In Required</h2>
+          <p className="text-xs text-[#86868b]">Please sign in through the DigiSafe extension to view WhatsApp intelligence.</p>
+          <div className="pt-2">
+            <Link href="/" className="px-5 py-2.5 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 transition-colors inline-block">
+              Return Home
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -73,46 +84,76 @@ export default function WhatsAppDashboard() {
   });
   const pieData = Object.keys(categoryMap).map(key => ({ name: key, value: categoryMap[key] }));
 
-  const COLORS = {
-    Phishing: '#ef4444',
-    Scam: '#f97316',
-    Misinformation: '#eab308',
-    Safe: '#22c55e',
-    Unsure: '#f59e0b'
+  const COLORS: Record<string, string> = {
+    Phishing: '#ff453a',
+    Scam: '#ff9f0a',
+    Misinformation: '#ffd60a',
+    Safe: '#30d158',
+    Unsure: '#bf5af2',
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-8 font-sans">
+    <div className="min-h-screen bg-[#000000] text-[#f5f5f7] font-sans antialiased p-8 selection:bg-[#0a84ff]/30 selection:text-white">
       <div className="max-w-7xl mx-auto space-y-8">
-        <h1 className="text-2xl font-bold border-b border-slate-800 pb-4">WhatsApp & Messaging Intelligence</h1>
+        
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              className="w-8 h-8 rounded-xl bg-white/[0.05] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors"
+            >
+              ‹
+            </Link>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-semibold tracking-tight text-white">WhatsApp &amp; Messaging Intelligence</h1>
+                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-[#30d158]/10 text-[#30d158] border border-[#30d158]/20">
+                  Active Shield
+                </span>
+              </div>
+              <p className="text-xs text-[#86868b] mt-0.5">Real-time smishing, unknown sender triage, and QR payload interception.</p>
+            </div>
+          </div>
+
+          <Link
+            href="/dashboard"
+            className="text-xs text-[#86868b] hover:text-white border border-white/10 bg-white/[0.04] rounded-full px-3.5 py-1.5 transition-colors"
+          >
+            All Channels
+          </Link>
+        </div>
         
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
-            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-slate-400 text-sm">Loading intelligence metrics...</p>
+            <div className="w-7 h-7 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+            <p className="text-[#86868b] text-xs font-mono">Loading messaging intelligence...</p>
           </div>
         ) : (
           <>
             {/* KPI Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-6 backdrop-blur-sm">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">Total WhatsApp Scans</p>
-                <p className="text-3xl font-bold text-slate-100">{totalScans}</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="apple-card rounded-2xl p-6">
+                <p className="text-[11px] text-[#86868b] font-medium uppercase tracking-wider mb-2">Total WhatsApp Scans</p>
+                <p className="text-3xl font-semibold text-white tracking-tight">{totalScans}</p>
+                <p className="text-[11px] text-[#86868b] mt-1.5">Incoming chats monitored</p>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-6 backdrop-blur-sm">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">High-Risk Threat Rate</p>
-                <p className="text-3xl font-bold text-slate-100">{threatRate}%</p>
+              <div className="apple-card rounded-2xl p-6">
+                <p className="text-[11px] text-[#86868b] font-medium uppercase tracking-wider mb-2">High-Risk Threat Rate</p>
+                <p className="text-3xl font-semibold text-[#ff453a] tracking-tight">{threatRate}%</p>
+                <p className="text-[11px] text-[#86868b] mt-1.5">Urgency &amp; financial fraud vectors</p>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-6 backdrop-blur-sm">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">Unknown Numbers Flagged</p>
-                <p className="text-3xl font-bold text-slate-100">{unknownNumbersCount}</p>
+              <div className="apple-card rounded-2xl p-6">
+                <p className="text-[11px] text-[#86868b] font-medium uppercase tracking-wider mb-2">Unknown Senders Flagged</p>
+                <p className="text-3xl font-semibold text-[#ff9f0a] tracking-tight">{unknownNumbersCount}</p>
+                <p className="text-[11px] text-[#86868b] mt-1.5">Unsaved contact screening</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Categorical Breakdown */}
-              <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-6 backdrop-blur-sm">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6">Threat Category Mix</h3>
+              <div className="apple-card rounded-2xl p-6">
+                <h3 className="text-[11px] font-medium text-[#86868b] uppercase tracking-wider mb-6">Threat Category Mix</h3>
                 <div className="h-64">
                   {pieData.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
@@ -121,91 +162,116 @@ export default function WhatsAppDashboard() {
                           data={pieData}
                           innerRadius={60}
                           outerRadius={80}
-                          paddingAngle={5}
+                          paddingAngle={4}
                           dataKey="value"
+                          strokeWidth={0}
                         >
                           {pieData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[entry.name as keyof typeof COLORS] || '#64748b'} />
+                            <Cell key={`cell-${index}`} fill={COLORS[entry.name] || '#636366'} />
                           ))}
                         </Pie>
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155' }} itemStyle={{ color: '#f8fafc' }} />
-                        <Legend verticalAlign="bottom" height={36}/>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'rgba(20,20,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px' }}
+                          itemStyle={{ color: '#f5f5f7' }}
+                        />
+                        <Legend verticalAlign="bottom" height={36} />
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-slate-500 text-sm">No categorical data available</div>
+                    <div className="h-full flex items-center justify-center text-[#86868b] text-xs">No categorical data available</div>
                   )}
                 </div>
               </div>
 
-              {/* Messaging Incident Table */}
-              <div className="lg:col-span-2 bg-slate-800/60 border border-slate-700/50 rounded-xl p-6 backdrop-blur-sm overflow-hidden">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6">Recent Messaging Incidents</h3>
+              {/* Messaging Incident Table with Expansion on Hover */}
+              <div className="lg:col-span-2 apple-glass rounded-2xl p-6 overflow-hidden">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[11px] font-medium text-[#86868b] uppercase tracking-wider">Recent Messaging Incidents</h3>
+                  <span className="text-[10px] text-white/40 font-mono">Hover to inspect</span>
+                </div>
+                
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
                     <thead>
-                      <tr className="border-b border-slate-700/50 bg-slate-800/80">
-                        <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sender / Phone Number</th>
-                        <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Risk Score</th>
-                        <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Threat Classification</th>
+                      <tr className="border-b border-white/[0.08] text-[11px] font-medium text-[#86868b] uppercase tracking-wider">
+                        <th className="px-4 py-3">Sender / Identity</th>
+                        <th className="px-4 py-3">Risk Gauge</th>
+                        <th className="px-4 py-3 text-right">Classification</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-700/30">
-                      {events.slice(0, 10).map((evt, idx) => (
-                        <React.Fragment key={idx}>
-                          <tr 
-                            className="hover:bg-slate-700/20 transition-colors cursor-pointer"
-                            onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
-                          >
-                            <td className="px-5 py-3">
-                              <div className="font-medium text-slate-300">{evt.sender || 'Unknown'}</div>
-                              {evt.is_unknown_sender && (
-                                <span className="inline-block mt-1 text-[10px] bg-amber-900/40 text-amber-500 border border-amber-500/30 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">
-                                  Unknown Sender
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-5 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="w-8 text-slate-400">{evt.confidence_score}%</span>
-                                <div className="flex-1 h-1.5 bg-slate-700 rounded-full max-w-[80px]">
-                                  <div 
-                                    className={`h-full rounded-full ${
-                                      evt.confidence_score > 70 ? 'bg-red-500' :
-                                      evt.confidence_score > 40 ? 'bg-yellow-500' : 'bg-green-500'
-                                    }`}
-                                    style={{ width: `${evt.confidence_score}%` }}
-                                  />
+                    <tbody className="divide-y divide-white/[0.06]">
+                      {events.slice(0, 10).map((evt, idx) => {
+                        const isOpen = expandedRow === idx || hoveredRow === idx;
+                        const eventDate = new Date(evt.created_at || evt.timestamp || Date.now());
+
+                        return (
+                          <React.Fragment key={evt.id || idx}>
+                            <tr 
+                              className={`transition-colors cursor-pointer ${isOpen ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'}`}
+                              onMouseEnter={() => setHoveredRow(idx)}
+                              onMouseLeave={() => setHoveredRow(null)}
+                              onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
+                            >
+                              <td className="px-4 py-3.5">
+                                <div className="font-medium text-white/90 text-xs">{evt.sender || 'Unknown Origin'}</div>
+                                {evt.is_unknown_sender && (
+                                  <span className="inline-block mt-1 text-[9px] bg-[#ff9f0a]/15 text-[#ff9f0a] border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider">
+                                    UNSAVED
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+                                    <div 
+                                      className={`h-full rounded-full ${
+                                        evt.confidence_score > 70 ? 'bg-[#ff453a]' :
+                                        evt.confidence_score > 40 ? 'bg-[#ff9f0a]' : 'bg-[#30d158]'
+                                      }`}
+                                      style={{ width: `${evt.confidence_score}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs font-mono text-[#86868b]">{evt.confidence_score}%</span>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3">
-                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border ${
-                                evt.threat_category === 'Phishing' ? 'bg-red-900/40 text-red-400 border-red-500/30' :
-                                evt.threat_category === 'Scam' ? 'bg-orange-900/40 text-orange-400 border-orange-500/30' :
-                                evt.threat_category === 'Safe' ? 'bg-green-900/40 text-green-400 border-green-500/30' :
-                                'bg-slate-700 text-slate-300 border-slate-600'
-                              }`}>
-                                {evt.threat_category}
-                              </span>
-                            </td>
-                          </tr>
-                          {expandedRow === idx && (
-                            <tr className="bg-slate-800/80">
-                              <td colSpan={3} className="px-5 py-4 border-b border-slate-700/50">
-                                <p className="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wider">AI Explanation</p>
-                                <p className="text-sm text-slate-300 mb-2">{evt.ai_explanation || 'No explanation provided.'}</p>
-                                <p className="text-xs text-slate-500">
-                                  Scanned at: {new Date(evt.created_at || evt.timestamp).toLocaleString()}
-                                </p>
+                              </td>
+                              <td className="px-4 py-3.5 text-right">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                                  evt.threat_category === 'Phishing' ? 'bg-[#ff453a]/10 text-[#ff453a] border-[#ff453a]/20' :
+                                  evt.threat_category === 'Scam' ? 'bg-[#ff9f0a]/10 text-[#ff9f0a] border-[#ff9f0a]/20' :
+                                  evt.threat_category === 'Safe' ? 'bg-[#30d158]/10 text-[#30d158] border-[#30d158]/20' :
+                                  'bg-white/[0.06] text-white/80 border-white/10'
+                                }`}>
+                                  {evt.threat_category}
+                                </span>
                               </td>
                             </tr>
-                          )}
-                        </React.Fragment>
-                      ))}
+                            <AnimatePresence>
+                              {isOpen && (
+                                <tr>
+                                  <td colSpan={3} className="p-0">
+                                    <motion.div
+                                      initial={{ opacity: 0, height: 0 }}
+                                      animate={{ opacity: 1, height: 'auto' }}
+                                      exit={{ opacity: 0, height: 0 }}
+                                      transition={{ duration: 0.2 }}
+                                      className="overflow-hidden bg-black/40 border-b border-white/[0.06] px-5 py-3 space-y-2"
+                                    >
+                                      <p className="text-[10px] text-white/50 uppercase font-mono tracking-wider font-semibold">AI Explanation</p>
+                                      <p className="text-xs text-white/80 leading-relaxed">{evt.ai_explanation || 'No forensic breakdown available.'}</p>
+                                      <p className="text-[10px] text-[#86868b] font-mono">
+                                        Scanned: {eventDate.toLocaleString()}
+                                      </p>
+                                    </motion.div>
+                                  </td>
+                                </tr>
+                              )}
+                            </AnimatePresence>
+                          </React.Fragment>
+                        );
+                      })}
                       {events.length === 0 && (
                         <tr>
-                          <td colSpan={3} className="px-5 py-8 text-center text-slate-500 text-sm italic">
+                          <td colSpan={3} className="px-4 py-12 text-center text-[#86868b] text-xs italic">
                             No recent messaging incidents found.
                           </td>
                         </tr>

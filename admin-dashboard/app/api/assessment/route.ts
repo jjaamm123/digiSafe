@@ -36,9 +36,9 @@ export async function GET(req: NextRequest) {
 
     const { data: scanEvents, error: dbError } = await supabase
       .from('scan_events')
-      .select('source, threat_category, confidence_score, ai_explanation, timestamp')
+      .select('*')
       .eq('user_id', user.id)
-      .order('timestamp', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(50);
 
     if (dbError) {

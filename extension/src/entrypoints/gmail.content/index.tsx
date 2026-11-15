@@ -35,6 +35,32 @@ export default defineContentScript({
   },
 });
 
+function purgeLegacyElements() {
+  try {
+    const legacySelectors = [
+      '.dsa-badge-container',
+      '.dsa-result-card',
+      '.dsa-scan-button',
+      '.dsa-error-text',
+    ];
+    document.querySelectorAll(legacySelectors.join(',')).forEach((el) => el.remove());
+
+    document.querySelectorAll('button, div, span').forEach((el) => {
+      const txt = el.textContent || '';
+      if (
+        txt.includes('Scan Security') ||
+        txt.includes('Ensure the backend server is running on http://localhost:5000') ||
+        (el.classList?.contains('dsa-title') && txt.includes('Scan Failed'))
+      ) {
+        const container = el.closest('.dsa-badge-container') || el.closest('.dsa-result-card') || el;
+        container.remove();
+      }
+    });
+  } catch {
+    // Defensive pass
+  }
+}
+
 function GmailScanner() {
   const [data, setData] = useState<ThreatData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,7 +71,11 @@ function GmailScanner() {
     let lastUrl = window.location.hash;
     let debounceTimer: NodeJS.Timeout;
 
+    purgeLegacyElements();
+    const purgeInterval = setInterval(purgeLegacyElements, 400);
+
     const checkEmail = () => {
+      purgeLegacyElements();
       const emailBody = document.querySelector('.a3s.aiL');
       if (emailBody && emailBody.textContent && emailBody.textContent.trim().length > 20) {
         setEmailText(emailBody.textContent);
@@ -55,7 +85,8 @@ function GmailScanner() {
     };
 
     const observer = new MutationObserver(() => {
-      // Handle SPA navigation by clearing data on URL hash change
+      purgeLegacyElements();
+
       if (window.location.hash !== lastUrl) {
         lastUrl = window.location.hash;
         setData(null);
@@ -74,6 +105,7 @@ function GmailScanner() {
 
     return () => {
       observer.disconnect();
+      clearInterval(purgeInterval);
       clearTimeout(debounceTimer);
     };
   }, []);
@@ -85,9 +117,34 @@ function GmailScanner() {
     setError(null);
     
     try {
+      let senderEmail = 'Unknown Sender';
+      const senderEl = document.querySelector('.gD');
+      if (senderEl) {
+        const name = senderEl.getAttribute('name');
+        const email = senderEl.getAttribute('email');
+        if (name && email) {
+          senderEmail = `${name} <${email}>`;
+        } else if (email) {
+          senderEmail = email;
+        } else if (name) {
+          senderEmail = name;
+        } else {
+          senderEmail = senderEl.textContent || 'Unknown Sender';
+        }
+      } else {
+        const fallbackEl = document.querySelector('span[email], div.go span');
+        if (fallbackEl) {
+          senderEmail = fallbackEl.getAttribute('email') || fallbackEl.textContent || 'Unknown Sender';
+        }
+      }
+
+      if (!chrome.runtime?.id) {
+        throw new Error('Extension updated. Please refresh the tab to reconnect.');
+      }
+
       const response: any = await browser.runtime.sendMessage({
         type: 'SCAN_REQUEST',
-        payload: { text: emailText, source: 'gmail' }
+        payload: { text: emailText, sender: senderEmail, source: 'gmail' }
       });
       
       setLoading(false);
@@ -97,10 +154,22 @@ function GmailScanner() {
           
           const scanData: ThreatData = {
             classification: payloadData.classification || payloadData.threatCategory || 'Safe',
+            category: payloadData.category,
             riskScore: payloadData.riskScore ?? payloadData.risk_score ?? 0,
+            sender: payloadData.sender,
+            senderIdentity: payloadData.senderIdentity,
             indicators: payloadData.indicators || [],
             flaggedPhrases: payloadData.flaggedPhrases || payloadData.flagged_phrases || [],
-            isMock: payloadData.isMock || false
+            quotedPhrases: payloadData.quotedPhrases || [],
+            triggerKeywords: payloadData.triggerKeywords || [],
+            detectedLinks: payloadData.detectedLinks || [],
+            linkForensics: payloadData.linkForensics || [],
+            explanation: payloadData.explanation || '',
+            actionableGuidance: payloadData.actionableGuidance || '',
+            evidence: payloadData.evidence,
+            isMock: payloadData.isMock || false,
+            isLocalTriage: payloadData.isLocalTriage || false,
+            engine: payloadData.engine,
           };
 
           setData(scanData);
@@ -119,7 +188,6 @@ function GmailScanner() {
     }
   };
 
-  // Do not render anything if no email text is detected on screen
   if (!emailText) return null;
 
   return (

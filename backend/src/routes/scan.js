@@ -4,14 +4,10 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 
-// Ensure environment variables are loaded
 dotenv.config();
 
 const router = express.Router();
 
-// ─────────────────────────────────────────────────────────────
-// 1. Client Initialization & CORS Middleware
-// ─────────────────────────────────────────────────────────────
 router.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -47,18 +43,9 @@ if (supabaseUrl && supabaseKey) {
   console.warn('[Digital Safety Backend] WARNING: Missing Supabase credentials.');
 }
 
-// ─────────────────────────────────────────────────────────────
-// 2. Gemini System Prompt (built dynamically per-request)
-// Injects current timestamp for temporal awareness and contains
-// the Sender Verification + Unsure Failsafe guardrail logic.
-// ─────────────────────────────────────────────────────────────
 const buildSystemPrompt = (sender = '', isUnknownSender = false, hasCallEvent = false) => {
-  // Inject live timestamp so the AI never hallucinates past/future dates
   const currentDateTime = new Date().toISOString();
 
-  // Build the sender metadata block. When the Chrome extension successfully extracts
-  // the raw "from" address from the Gmail header card, it is passed here explicitly
-  // so the model does NOT have to guess or hunt for it inside the email body text.
   const senderBlock = sender
     ? `[SENDER VERIFICATION METADATA]:
 - Claimed Sender Field: ${sender}
@@ -154,10 +141,6 @@ STEP 3 — OUTPUT REQUIREMENTS
 - For "Safe" or "Phishing" classifications, summaryDetails must be an empty string "".`;
 };
 
-// ─────────────────────────────────────────────────────────────
-// 3. Response JSON Schema
-// Updated to include "Unsure" classification and summaryDetails
-// ─────────────────────────────────────────────────────────────
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -197,9 +180,6 @@ const RESPONSE_SCHEMA = {
   required: ['riskLevel', 'riskScore', 'classification', 'senderDomain', 'indicators', 'flaggedPhrases', 'summaryDetails']
 };
 
-// ─────────────────────────────────────────────────────────────
-// 4. Fallback Heuristics (used when Gemini is unavailable)
-// ─────────────────────────────────────────────────────────────
 const getFallbackHeuristics = () => {
   return {
     isMock: true,
@@ -216,24 +196,15 @@ const getFallbackHeuristics = () => {
   };
 };
 
-// ─────────────────────────────────────────────────────────────
-// OPTIONS /scan (CORS Preflight)
-// ─────────────────────────────────────────────────────────────
 router.options('/scan', (req, res) => {
   return res.status(200).send();
 });
 
-// ─────────────────────────────────────────────────────────────
-// POST /scan
-// ─────────────────────────────────────────────────────────────
+
 router.post('/scan', async (req, res) => {
   try {
-    // Destructure sender — the raw email address extracted from the Gmail DOM header
-    // by the Chrome extension (e.g. "noreply@sbl.com.np"). Falls back to empty string
-    // when not provided (LinkedIn posts, missing header, older extension versions).
     const { text, source, sender = '', isUnknownSender = false, hasCallEvent = false } = req.body;
 
-    // Basic payload validation
     if (!text || typeof text !== 'string') {
       return res.status(400).json({
         success: false,
@@ -252,12 +223,8 @@ router.post('/scan', async (req, res) => {
     let analysisResult = null;
     let isMock = true;
 
-    // ── Gemini AI Analysis ──────────────────────────────────
     if (ai) {
       try {
-        // Build the system prompt fresh per request:
-        // injects the current timestamp AND the sender address as an authoritative
-        // metadata block so the model can apply the domain-match override rule.
         const systemPrompt = buildSystemPrompt(sender, isUnknownSender, hasCallEvent);
 
         console.log(`Routing to Gemini 2.5 Flash [sender=${sender || 'none'}]...`);
@@ -267,9 +234,9 @@ router.post('/scan', async (req, res) => {
           contents: text,
           config: {
             systemInstruction: systemPrompt,
-            responseMimeType: 'application/json', // Enforce strict JSON output
+            responseMimeType: 'application/json',
             responseSchema: RESPONSE_SCHEMA,
-            temperature: 0.1 // Near-zero temp for deterministic, objective threat scoring
+            temperature: 0.1 
           }
         });
 
@@ -281,25 +248,23 @@ router.post('/scan', async (req, res) => {
           throw new Error('Received an empty response body from the Gemini API.');
         }
       } catch (aiError) {
-        // Log but never crash — fall through to heuristics
         console.error('Gemini API call failed. Falling back to mock heuristics:', aiError.message || aiError);
       }
     }
 
-    // ── Fallback if Gemini unavailable or errored ───────────
+
     if (!analysisResult) {
       console.log('Applying Fallback Heuristics (isMock = true)...');
       analysisResult = getFallbackHeuristics();
       isMock = true;
     }
 
-    // ── Telemetry → Supabase (only for live AI results) ─────
+
     if (!isMock && supabase) {
       try {
         const eventId = crypto.randomUUID();
         let userId = null;
 
-        // Extract real user from the Bearer token
         const authHeader = req.headers.authorization;
         if (authHeader && authHeader.startsWith('Bearer ')) {
           const token = authHeader.substring(7);
@@ -312,7 +277,6 @@ router.post('/scan', async (req, res) => {
         if (!userId) {
           console.warn('Telemetry skipped: No valid authenticated user found in request.');
         } else {
-          // Ensure the user exists in the public users table before linking an event
           const { error: userError } = await supabase
             .from('users')
             .upsert(
@@ -322,7 +286,7 @@ router.post('/scan', async (req, res) => {
             
           if (userError) {
             console.error('Failed to upsert user:', userError);
-            // Decide whether to throw or continue based on your architecture
+
           }
 
           const scanEventRecord = {
@@ -349,12 +313,11 @@ router.post('/scan', async (req, res) => {
           }
         }
       } catch (telemetryError) {
-        // Telemetry failure must never block the response to the user
         console.error('Telemetry pipeline error (non-fatal):', telemetryError.message || telemetryError);
       }
     }
 
-    // ── Final Response ───────────────────────────────────────
+
     return res.json({
       success: true,
       data: {
@@ -372,7 +335,6 @@ router.post('/scan', async (req, res) => {
     });
 
   } catch (error) {
-    // Ultimate catch-all — server must never crash
     console.error('Unhandled Server Error in POST /api/scan:', error.message || error);
 
     const fallback = getFallbackHeuristics();

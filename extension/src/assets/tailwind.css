@@ -1,3 +1,64 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --apple-bg: #000000;
+  --apple-surface: rgba(24, 24, 27, 0.8);
+  --apple-border: rgba(255, 255, 255, 0.1);
+  --apple-blue: #0a84ff;
+  --apple-green: #30d158;
+  --apple-red: #ff453a;
+  --apple-orange: #ff9f0a;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.apple-popup-glass {
+  background: rgba(18, 18, 20, 0.88);
+  backdrop-filter: blur(32px) saturate(200%);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 50px -10px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.apple-pill-btn {
+  background: #121214 !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.apple-pill-btn:hover {
+  background: #1c1c1f !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Refined macOS style scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
